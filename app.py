@@ -20,7 +20,7 @@ from tkinter import ttk
 API_BASE = "https://api.weixin.qq.com"
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 OPENAI_MODEL_OPTIONS = ("gpt-4.1-mini", "gpt-4.1", "gpt-5-mini", "gpt-5")
-APP_VERSION = "0.9.17"
+APP_VERSION = "0.9.18"
 
 UI_PALETTE = {
     "bg": "#f6f2ea",
@@ -817,7 +817,7 @@ class PublisherApp:
         self.current_ip = StringVar(value="未检测")
         self.last_ip = StringVar(value=self.config.get("last_public_ip") or "未记录")
         self.wechat_seen_ip = StringVar(value="未获取")
-        self.title = StringVar(value=self.config.get("last_title", ""))
+        self.title = StringVar(value="")
         self.author = StringVar(value=self.config.get("author", ""))
         self.digest = StringVar()
         self.source_url = StringVar()
@@ -1162,6 +1162,7 @@ class PublisherApp:
             width=12,
         ).pack(side="left", padx=(6, 8))
         ttk.Button(tools, text="套用", command=self.apply_template).pack(side="left")
+        ttk.Button(tools, text="新建文章", command=self.new_article).pack(side="left", padx=(8, 0))
         ttk.Button(tools, text="保存本地草稿", command=self.save_local_draft).pack(side="left", padx=(8, 0))
         ttk.Button(tools, text="打开本地草稿", command=self.load_local_draft).pack(side="left", padx=(8, 0))
 
@@ -1598,6 +1599,29 @@ class PublisherApp:
         self.replace_content(template)
         self.status.set(f"已套用“{self.template_name.get()}”模板。")
 
+    def new_article(self):
+        current = self.content.get("1.0", END).strip()
+        has_article = any(
+            (
+                self.title.get().strip(),
+                self.digest.get().strip(),
+                self.cover_path.get().strip(),
+                self.image_paths,
+                current,
+            )
+        )
+        if has_article and not messagebox.askyesno("新建文章", "新建文章会清空当前标题、正文、封面和正文图片，确定继续吗？"):
+            return
+        self.title.set("")
+        self.digest.set("")
+        self.source_url.set("")
+        self.cover_path.set("")
+        self.image_paths = []
+        self.refresh_image_list()
+        self.replace_content("")
+        self.status.set("已新建空白文章。")
+        self.log_message("已新建空白文章。")
+
     def apply_clean_layout(self):
         self.layout_style.set("公众号图文")
         self.auto_emoji.set(0)
@@ -1911,7 +1935,6 @@ class PublisherApp:
             "remember_secret": int(self.remember_secret.get()),
             "appsecret": self.secret.get().strip() if self.remember_secret.get() else "",
             "author": self.author.get().strip(),
-            "last_title": self.title.get().strip(),
             "last_public_ip": self.last_ip.get() if self.last_ip.get() != "未记录" else "",
             "auto_emoji": int(self.auto_emoji.get()),
             "auto_image_layout": int(self.auto_image_layout.get()),
@@ -2077,7 +2100,6 @@ class PublisherApp:
                 "remember_secret": int(self.remember_secret.get()),
                 "appsecret": self.secret.get().strip() if self.remember_secret.get() else "",
                 "author": self.author.get().strip(),
-                "last_title": self.title.get().strip(),
                 "last_public_ip": public_ip if public_ip is not None else (
                     self.last_ip.get() if self.last_ip.get() != "未记录" else ""
                 ),
