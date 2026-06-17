@@ -13,13 +13,14 @@ import webbrowser
 from concurrent.futures import TimeoutError, ThreadPoolExecutor, as_completed
 from pathlib import Path
 from tkinter import Canvas, END, IntVar, Menu, StringVar, Text, Tk, filedialog, messagebox
+from tkinter import font as tkfont
 from tkinter import ttk
 
 
 API_BASE = "https://api.weixin.qq.com"
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 OPENAI_MODEL_OPTIONS = ("gpt-4.1-mini", "gpt-4.1", "gpt-5-mini", "gpt-5")
-APP_VERSION = "0.9.16"
+APP_VERSION = "0.9.17"
 
 UI_PALETTE = {
     "bg": "#f6f2ea",
@@ -572,6 +573,12 @@ class AutoFormatter:
         blocks.append(self.footer())
         return f'<section style="{self.WRAPPER_STYLE}">' + "\n".join(blocks) + "</section>"
 
+    def inline_html(self, text):
+        escaped = html.escape(text)
+        escaped = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", escaped)
+        escaped = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"<em>\1</em>", escaped)
+        return escaped
+
     def header(self):
         if self.is_wechat_style():
             if not self.subtitle:
@@ -743,7 +750,7 @@ class AutoFormatter:
             )
 
         if line.startswith(">"):
-            text = html.escape(line[1:].strip())
+            text = self.inline_html(line[1:].strip())
             if self.is_wechat_style():
                 return (
                     f'<section style="margin:18px 0;padding:2px 0 2px 12px;'
@@ -761,7 +768,7 @@ class AutoFormatter:
 
         if re.match(r"^[-*]\s+", line):
             self.list_count += 1
-            text = html.escape(re.sub(r"^[-*]\s+", "", line))
+            text = self.inline_html(re.sub(r"^[-*]\s+", "", line))
             if self.is_wechat_style():
                 return (
                     f'<section style="margin:10px 0;padding:6px 0;">'
@@ -784,11 +791,11 @@ class AutoFormatter:
             return (
                 f'<p style="margin:{top_margin}px 0;color:{self.theme["text"]};font-size:16px;'
                 f'line-height:2.05;text-align:justify;">'
-                f'{self.paragraph_emoji(line)}{html.escape(line)}</p>'
+                f'{self.paragraph_emoji(line)}{self.inline_html(line)}</p>'
             )
         return (
             f'<p style="margin:14px 0;color:{self.theme["text"]};line-height:1.95;">'
-            f'{self.paragraph_emoji(line)}{html.escape(line)}</p>'
+            f'{self.paragraph_emoji(line)}{self.inline_html(line)}</p>'
         )
 
 
@@ -1158,6 +1165,18 @@ class PublisherApp:
         ttk.Button(tools, text="保存本地草稿", command=self.save_local_draft).pack(side="left", padx=(8, 0))
         ttk.Button(tools, text="打开本地草稿", command=self.load_local_draft).pack(side="left", padx=(8, 0))
 
+        rich_tools = ttk.Frame(parent, style="Panel.TFrame")
+        rich_tools.pack(fill="x", pady=(0, 10))
+        ttk.Label(rich_tools, text="富文本", style="Panel.TLabel").pack(side="left")
+        ttk.Button(rich_tools, text="大标题", command=lambda: self.apply_line_prefix("## ")).pack(side="left", padx=(6, 0))
+        ttk.Button(rich_tools, text="小标题", command=lambda: self.apply_line_prefix("### ")).pack(side="left", padx=(6, 0))
+        ttk.Button(rich_tools, text="加粗", command=lambda: self.wrap_selection("**", "**")).pack(side="left", padx=(6, 0))
+        ttk.Button(rich_tools, text="斜体", command=lambda: self.wrap_selection("*", "*")).pack(side="left", padx=(6, 0))
+        ttk.Button(rich_tools, text="引用", command=lambda: self.apply_line_prefix("> ")).pack(side="left", padx=(6, 0))
+        ttk.Button(rich_tools, text="列表", command=lambda: self.apply_line_prefix("- ")).pack(side="left", padx=(6, 0))
+        ttk.Button(rich_tools, text="插入图片位", command=self.insert_next_image_placeholder).pack(side="left", padx=(6, 0))
+        ttk.Button(rich_tools, text="清除格式", command=self.clear_selected_formatting).pack(side="left", padx=(6, 0))
+
         panes = ttk.PanedWindow(parent, orient="horizontal")
         panes.pack(fill="both", expand=True)
 
@@ -1181,10 +1200,12 @@ class PublisherApp:
             highlightbackground=UI_PALETTE["border"],
             highlightcolor=UI_PALETTE["accent"],
         )
+        self.configure_rich_text_tags()
         self.content.insert(END, self.sample_content())
         self.content.pack(fill="both", expand=True)
-        self.content.bind("<KeyRelease>", lambda _event: self.schedule_ready_summary_refresh())
+        self.content.bind("<KeyRelease>", self.on_content_changed)
         self.bind_text_menu(self.content)
+        self.refresh_editor_styles()
 
         ttk.Label(preview_frame, text="操作反馈", style="Title.TLabel").pack(anchor="w", pady=(0, 6))
         ttk.Label(
@@ -1301,6 +1322,112 @@ class PublisherApp:
         except Exception:
             pass
         return "break"
+
+    def configure_rich_text_tags(self):
+        base_font = tkfont.Font(family="Microsoft YaHei UI", size=11)
+        h2_font = tkfont.Font(family="Microsoft YaHei UI", size=15, weight="bold")
+        h3_font = tkfont.Font(family="Microsoft YaHei UI", size=13, weight="bold")
+        bold_font = tkfont.Font(family="Microsoft YaHei UI", size=11, weight="bold")
+        italic_font = tkfont.Font(family="Microsoft YaHei UI", size=11, slant="italic")
+        self.content.configure(font=base_font)
+        self.content.tag_configure("rich_h2", font=h2_font, foreground=UI_PALETTE["header_dark"], spacing1=10, spacing3=6)
+        self.content.tag_configure("rich_h3", font=h3_font, foreground=UI_PALETTE["text"], spacing1=8, spacing3=4)
+        self.content.tag_configure("rich_quote", foreground=UI_PALETTE["muted"], lmargin1=18, lmargin2=18, spacing1=4, spacing3=4)
+        self.content.tag_configure("rich_list", lmargin1=18, lmargin2=34)
+        self.content.tag_configure("rich_image", foreground=UI_PALETTE["accent"], background=UI_PALETTE["accent_soft"], justify="center", spacing1=8, spacing3=8)
+        self.content.tag_configure("rich_bold", font=bold_font)
+        self.content.tag_configure("rich_italic", font=italic_font)
+
+    def on_content_changed(self, _event=None):
+        self.schedule_ready_summary_refresh()
+        self.root.after_idle(self.refresh_editor_styles)
+
+    def refresh_editor_styles(self):
+        if not hasattr(self, "content"):
+            return
+        for tag in ("rich_h2", "rich_h3", "rich_quote", "rich_list", "rich_image", "rich_bold", "rich_italic"):
+            self.content.tag_remove(tag, "1.0", END)
+
+        text = self.content.get("1.0", "end-1c")
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            clean = line.strip()
+            line_start = f"{line_no}.0"
+            line_end = f"{line_no}.end"
+            if clean.startswith("## "):
+                self.content.tag_add("rich_h2", line_start, line_end)
+            elif clean.startswith("### "):
+                self.content.tag_add("rich_h3", line_start, line_end)
+            elif clean.startswith(">"):
+                self.content.tag_add("rich_quote", line_start, line_end)
+            elif re.match(r"^\s*[-*]\s+", line):
+                self.content.tag_add("rich_list", line_start, line_end)
+            elif IMAGE_PLACEHOLDER_PATTERN.fullmatch(clean):
+                self.content.tag_add("rich_image", line_start, line_end)
+
+            for match in re.finditer(r"\*\*(.+?)\*\*", line):
+                self.content.tag_add("rich_bold", f"{line_no}.{match.start(1)}", f"{line_no}.{match.end(1)}")
+            for match in re.finditer(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", line):
+                self.content.tag_add("rich_italic", f"{line_no}.{match.start(1)}", f"{line_no}.{match.end(1)}")
+
+    def wrap_selection(self, prefix, suffix):
+        try:
+            start = self.content.index("sel.first")
+            end = self.content.index("sel.last")
+            selected = self.content.get(start, end)
+            self.content.delete(start, end)
+            self.content.insert(start, f"{prefix}{selected}{suffix}")
+        except Exception:
+            self.content.insert("insert", f"{prefix}{suffix}")
+            self.content.mark_set("insert", f"insert-{len(suffix)}c")
+        self.content.focus_set()
+        self.on_content_changed()
+
+    def apply_line_prefix(self, prefix):
+        try:
+            start_line = int(self.content.index("sel.first").split(".")[0])
+            end_line = int(self.content.index("sel.last").split(".")[0])
+        except Exception:
+            start_line = end_line = int(self.content.index("insert").split(".")[0])
+
+        for line_no in range(start_line, end_line + 1):
+            line_start = f"{line_no}.0"
+            line_text = self.content.get(line_start, f"{line_no}.end")
+            clean = re.sub(r"^\s*(#{2,3}\s+|>\s+|[-*]\s+)", "", line_text)
+            self.content.delete(line_start, f"{line_no}.end")
+            self.content.insert(line_start, prefix + clean)
+        self.content.focus_set()
+        self.on_content_changed()
+
+    def insert_next_image_placeholder(self):
+        existing = [
+            normalize_image_number(item)
+            for item in IMAGE_PLACEHOLDER_PATTERN.findall(self.content.get("1.0", END))
+        ]
+        next_index = 1
+        while next_index in existing:
+            next_index += 1
+        if self.image_paths:
+            next_index = min(next_index, len(self.image_paths))
+        placeholder = f"\n[[图片{next_index}]]\n"
+        self.content.insert("insert", placeholder)
+        self.content.focus_set()
+        self.on_content_changed()
+
+    def clear_selected_formatting(self):
+        try:
+            start = self.content.index("sel.first")
+            end = self.content.index("sel.last")
+        except Exception:
+            start = self.content.index("insert linestart")
+            end = self.content.index("insert lineend")
+        text = self.content.get(start, end)
+        text = re.sub(r"(?m)^\s*(#{2,3}\s+|>\s+|[-*]\s+)", "", text)
+        text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+        text = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"\1", text)
+        self.content.delete(start, end)
+        self.content.insert(start, text)
+        self.content.focus_set()
+        self.on_content_changed()
 
     def install_change_watchers(self):
         variables = (
@@ -1459,7 +1586,7 @@ class PublisherApp:
     def replace_content(self, text):
         self.content.delete("1.0", END)
         self.content.insert(END, text)
-        self.schedule_ready_summary_refresh()
+        self.on_content_changed()
 
     def apply_template(self):
         template = ARTICLE_TEMPLATES.get(self.template_name.get())
@@ -1895,7 +2022,7 @@ class PublisherApp:
         self.content.insert(END, body or text.strip())
         if self.auto_image_layout.get() and self.image_paths and not self.has_manual_image_placeholders():
             self.auto_place_body_images(show_message=False)
-        self.schedule_ready_summary_refresh()
+        self.on_content_changed()
         self.ai_status.set(f"{source}已放入正文编辑区。")
         self.status.set(f"{source}已导入，可以继续排版或创建草稿。")
         self.log_message(f"{source}已导入正文。")
